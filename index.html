@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trợ lý Chatbot RAG (Hỗ trợ Giọng nói)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Thêm thư viện PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Be Vietnam Pro', sans-serif;
+        }
+        .chat-bubble-user {
+            background-color: #1e40af; /* blue-800 */
+            color: white;
+        }
+        .chat-bubble-bot {
+            background-color: #e5e7eb; /* gray-200 */
+            color: #1f2937; /* gray-800 */
+        }
+        .chat-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .chat-container::-webkit-scrollbar-track {
+            background: #f1f5f9; /* slate-100 */
+        }
+        .chat-container::-webkit-scrollbar-thumb {
+            background: #94a3b8; /* slate-400 */
+            border-radius: 10px;
+        }
+        .chat-container::-webkit-scrollbar-thumb:hover {
+            background: #64748b; /* slate-500 */
+        }
+        .file-list-item:hover {
+            background-color: #f8fafc; /* slate-50 */
+        }
+        .drop-zone {
+            border: 2px dashed #94a3b8;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        .drop-zone.drag-over {
+            background-color: #e0f2fe; /* sky-100 */
+            border-color: #0ea5e9; /* sky-500 */
+        }
+        /* CSS cho nút micro đang ghi âm */
+        .recording {
+            color: #ef4444; /* red-500 */
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-6xl mx-auto bg-white rounded-2xl shadow-2xl flex flex-col md:flex-row h-[90vh]">
+
+        <!-- Bảng điều khiển bên trái: Tải lên và danh sách tệp -->
+        <div class="w-full md:w-1/3 border-r border-slate-200 p-6 flex flex-col">
+            <div class="flex items-center mb-6">
+                <div class="bg-sky-500 text-white p-2 rounded-lg mr-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-bold text-slate-800">Tài liệu của bạn</h1>
+            </div>
+
+            <!-- Vùng kéo thả -->
+            <div id="drop-zone" class="drop-zone w-full p-6 text-center rounded-lg mb-4 cursor-pointer hover:bg-slate-50">
+                <input type="file" id="file-input" multiple class="hidden" accept=".txt,.pdf">
+                <i class="fas fa-cloud-upload-alt text-4xl text-slate-400 mb-2"></i>
+                <p class="text-slate-500">Kéo & thả tệp vào đây hoặc <span class="text-sky-500 font-semibold">nhấn để chọn</span></p>
+                <p class="text-xs text-slate-400 mt-1">Hỗ trợ .txt và .pdf</p>
+            </div>
+
+            <h2 class="text-lg font-semibold text-slate-700 mb-3 mt-4 border-b pb-2">Tệp đã tải lên</h2>
+            <div id="file-list" class="flex-grow overflow-y-auto pr-2">
+                <p id="no-files-message" class="text-slate-500 text-sm italic">Chưa có tệp nào được tải lên.</p>
+            </div>
+             <div id="processing-indicator" class="hidden items-center text-sm text-sky-600 mt-4">
+                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-sky-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Đang xử lý tài liệu...</span>
+            </div>
+        </div>
+
+        <!-- Giao diện Chat bên phải -->
+        <div class="w-full md:w-2/3 flex flex-col bg-slate-50 rounded-r-2xl">
+            <div class="p-6 border-b border-slate-200 flex items-center justify-between">
+                 <div class="flex items-center">
+                    <div class="bg-blue-800 text-white p-2 rounded-lg mr-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                    </div>
+                    <h2 class="text-2xl font-bold text-slate-800">Trợ lý Chatbot</h2>
+                 </div>
+                 <!-- Nút bật/tắt âm thanh -->
+                 <button id="toggle-tts-btn" class="text-slate-400 hover:text-sky-500 transition-colors" title="Bật/Tắt âm thanh">
+                    <i class="fas fa-volume-off text-xl"></i>
+                 </button>
+            </div>
+
+            <div id="chat-container" class="flex-grow p-6 overflow-y-auto chat-container">
+                <div class="flex justify-start mb-4">
+                    <div class="chat-bubble-bot p-4 rounded-lg max-w-lg">
+                        <p class="font-semibold mb-1">Trợ lý AI</p>
+                        <p>Xin chào! Hãy tải lên tài liệu, hoặc nhấn nút micro để đặt câu hỏi cho tôi.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Vùng nhập câu hỏi -->
+            <div class="p-6 border-t border-slate-200 bg-white rounded-br-2xl">
+                <div class="flex items-center bg-slate-100 rounded-lg p-2">
+                    <input type="text" id="user-input" class="w-full bg-transparent border-none focus:ring-0 text-slate-700" placeholder="Hỏi điều gì đó hoặc nhấn micro để nói...">
+                    <!-- Nút ghi âm -->
+                    <button id="mic-btn" class="text-slate-500 hover:text-sky-500 p-2 ml-2 transition-colors">
+                        <i class="fas fa-microphone text-xl"></i>
+                    </button>
+                    <button id="send-btn" class="bg-sky-500 text-white rounded-lg p-3 ml-2 hover:bg-sky-600 transition-colors disabled:bg-sky-300 disabled:cursor-not-allowed">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileList = document.getElementById('file-list');
+        const noFilesMessage = document.getElementById('no-files-message');
+        const chatContainer = document.getElementById('chat-container');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const processingIndicator = document.getElementById('processing-indicator');
+        const micBtn = document.getElementById('mic-btn');
+        const toggleTtsBtn = document.getElementById('toggle-tts-btn');
+
+        let documents = [];
+        let isTtsEnabled = false;
+        
+        // --- Cấu hình Web Speech API ---
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false; // Chỉ nhận diện một câu lệnh tại một thời điểm
+            recognition.lang = 'vi-VN'; // Thiết lập ngôn ngữ tiếng Việt
+            recognition.interimResults = false; // Chỉ trả về kết quả cuối cùng
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                userInput.value = transcript;
+                stopRecording();
+                handleSendMessage(); // Tự động gửi sau khi nói xong
+            };
+
+            recognition.onerror = (event) => {
+                console.error("Lỗi nhận dạng giọng nói:", event.error);
+                stopRecording();
+            };
+            
+            recognition.onend = () => {
+                stopRecording();
+            };
+
+        } else {
+            micBtn.style.display = 'none'; // Ẩn nút micro nếu trình duyệt không hỗ trợ
+            console.warn("Trình duyệt không hỗ trợ Web Speech API.");
+        }
+
+        function startRecording() {
+            if (recognition) {
+                userInput.placeholder = "Đang nghe...";
+                micBtn.classList.add('recording');
+                recognition.start();
+            }
+        }
+
+        function stopRecording() {
+            if (recognition) {
+                userInput.placeholder = "Hỏi điều gì đó hoặc nhấn micro để nói...";
+                micBtn.classList.remove('recording');
+                recognition.stop();
+            }
+        }
+        
+        micBtn.addEventListener('click', () => {
+            if (micBtn.classList.contains('recording')) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        });
+
+        // --- Cấu hình Text-to-Speech ---
+        function speak(text) {
+            if (!isTtsEnabled || !window.speechSynthesis) return;
+            
+            // Dừng phát âm thanh trước đó (nếu có)
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'vi-VN';
+            
+            // Cố gắng tìm một giọng đọc tiếng Việt
+            const voices = window.speechSynthesis.getVoices();
+            const vietnameseVoice = voices.find(voice => voice.lang === 'vi-VN');
+            if (vietnameseVoice) {
+                utterance.voice = vietnameseVoice;
+            }
+            
+            window.speechSynthesis.speak(utterance);
+        }
+        
+        // Cần tải danh sách giọng đọc, đôi khi nó không có sẵn ngay lập tức
+        if (window.speechSynthesis && window.speechSynthesis.onvoiceschanged !== undefined) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                window.speechSynthesis.getVoices();
+            };
+        }
+        
+        toggleTtsBtn.addEventListener('click', () => {
+            isTtsEnabled = !isTtsEnabled;
+            const icon = toggleTtsBtn.querySelector('i');
+            if (isTtsEnabled) {
+                icon.classList.remove('fa-volume-off');
+                icon.classList.add('fa-volume-high');
+                toggleTtsBtn.title = "Tắt âm thanh";
+                speak("Âm thanh đã được bật.");
+            } else {
+                window.speechSynthesis.cancel(); // Dừng phát âm thanh ngay lập tức
+                icon.classList.remove('fa-volume-high');
+                icon.classList.add('fa-volume-off');
+                toggleTtsBtn.title = "Bật âm thanh";
+            }
+        });
+
+
+        // --- Xử lý tệp và logic chat (giữ nguyên) ---
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('drag-over'); });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            handleFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', (e) => { handleFiles(e.target.files); });
+
+        async function readPdfFile(file) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+            let fullText = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                fullText += pageText + '\n\n';
+            }
+            return fullText;
+        }
+
+        async function handleFiles(files) {
+            const validFiles = Array.from(files).filter(f => f.type === 'text/plain' || f.type === 'application/pdf');
+            if (validFiles.length === 0) {
+                alert('Vui lòng chỉ tải lên các tệp .txt hoặc .pdf');
+                return;
+            }
+            
+            processingIndicator.classList.remove('hidden');
+            processingIndicator.classList.add('flex');
+
+            for (const file of validFiles) {
+                if (documents.some(doc => doc.name === file.name)) {
+                    console.log(`Tệp "${file.name}" đã tồn tại, bỏ qua.`);
+                    continue;
+                }
+                try {
+                    let content = '';
+                    if (file.type === 'application/pdf') {
+                        content = await readPdfFile(file);
+                    } else {
+                        content = await file.text();
+                    }
+                    const chunks = chunkText(content);
+                    documents.push({ name: file.name, content, chunks });
+                    addFileToListUI(file.name);
+                } catch (error) {
+                    console.error(`Lỗi khi xử lý tệp ${file.name}:`, error);
+                    alert(`Không thể xử lý tệp ${file.name}.`);
+                }
+            }
+            processingIndicator.classList.add('hidden');
+            processingIndicator.classList.remove('flex');
+        }
+
+        function chunkText(text, chunkSize = 500) {
+            const sentences = text.match(/[^.!?]+[.!?]*/g) || [];
+            const chunks = [];
+            let currentChunk = "";
+            for (const sentence of sentences) {
+                if ((currentChunk + sentence).length > chunkSize) {
+                    chunks.push(currentChunk.trim());
+                    currentChunk = sentence;
+                } else {
+                    currentChunk += " " + sentence;
+                }
+            }
+            if (currentChunk) chunks.push(currentChunk.trim());
+            return chunks;
+        }
+
+        function addFileToListUI(fileName) {
+            if (noFilesMessage) noFilesMessage.style.display = 'none';
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-list-item flex justify-between items-center p-2 rounded-md cursor-pointer';
+            fileItem.innerHTML = `<div class="flex items-center"><i class="fas fa-file-alt text-sky-500 mr-3"></i><span class="text-sm font-medium text-slate-700">${fileName}</span></div><button class="remove-file-btn text-slate-400 hover:text-red-500 transition-colors"><i class="fas fa-times-circle"></i></button>`;
+            fileList.appendChild(fileItem);
+            fileItem.querySelector('.remove-file-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeFile(fileName);
+                fileList.removeChild(fileItem);
+            });
+        }
+
+        function removeFile(fileName) {
+            documents = documents.filter(doc => doc.name !== fileName);
+            if (documents.length === 0 && noFilesMessage) {
+                noFilesMessage.style.display = 'block';
+            }
+        }
+
+        function addMessageToChat(sender, message, isHtml = false) {
+            const messageWrapper = document.createElement('div');
+            const messageBubble = document.createElement('div');
+            messageWrapper.classList.add('flex', 'mb-4');
+            messageBubble.classList.add('p-4', 'rounded-lg', 'max-w-lg');
+            if (sender === 'user') {
+                messageWrapper.classList.add('justify-end');
+                messageBubble.classList.add('chat-bubble-user');
+                messageBubble.textContent = message;
+            } else {
+                messageWrapper.classList.add('justify-start');
+                messageBubble.classList.add('chat-bubble-bot');
+                const botName = document.createElement('p');
+                botName.className = 'font-semibold mb-1';
+                botName.textContent = 'Trợ lý AI';
+                const botMessage = document.createElement('div');
+                if (isHtml) botMessage.innerHTML = message;
+                else botMessage.textContent = message;
+                messageBubble.appendChild(botName);
+                messageBubble.appendChild(botMessage);
+                
+                // Phát âm thanh cho câu trả lời của bot
+                speak(botMessage.textContent || botMessage.innerText);
+            }
+            messageWrapper.appendChild(messageBubble);
+            chatContainer.appendChild(messageWrapper);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        sendBtn.addEventListener('click', handleSendMessage);
+        userInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleSendMessage(); });
+
+        async function handleSendMessage() {
+            const query = userInput.value.trim();
+            if (!query) return;
+
+            if (documents.length === 0) {
+                addMessageToChat('bot', 'Vui lòng tải lên ít nhất một tài liệu trước khi đặt câu hỏi.');
+                return;
+            }
+
+            addMessageToChat('user', query);
+            userInput.value = '';
+            userInput.disabled = true;
+            sendBtn.disabled = true;
+
+            const typingIndicator = document.createElement('div');
+            typingIndicator.id = 'typing-indicator';
+            typingIndicator.className = 'flex justify-start mb-4';
+            typingIndicator.innerHTML = `<div class="chat-bubble-bot p-4 rounded-lg max-w-lg"><p class="font-semibold mb-1">Trợ lý AI</p><div class="flex items-center space-x-1"><span class="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style="animation-delay: 0s;"></span><span class="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style="animation-delay: 0.2s;"></span><span class="w-2 h-2 bg-slate-400 rounded-full animate-pulse" style="animation-delay: 0.4s;"></span></div></div>`;
+            chatContainer.appendChild(typingIndicator);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            try {
+                const relevantChunks = findRelevantChunks(query);
+                if (relevantChunks.length === 0) {
+                    addMessageToChat('bot', 'Tôi không tìm thấy thông tin liên quan đến câu hỏi của bạn trong các tài liệu đã cung cấp.');
+                } else {
+                    const answer = await generateAnswerWithGemini(query, relevantChunks);
+                    addMessageToChat('bot', answer.replace(/\n/g, '<br>'), true);
+                }
+            } catch (error) {
+                console.error("Lỗi khi tạo câu trả lời:", error);
+                addMessageToChat('bot', 'Đã có lỗi xảy ra. Vui lòng thử lại.');
+            } finally {
+                chatContainer.removeChild(typingIndicator);
+                userInput.disabled = false;
+                sendBtn.disabled = false;
+                userInput.focus();
+            }
+        }
+
+        function findRelevantChunks(query) {
+            const queryWords = query.toLowerCase().split(/\s+/);
+            let allChunks = [];
+            documents.forEach(doc => {
+                doc.chunks.forEach((chunk) => {
+                    let score = 0;
+                    queryWords.forEach(word => {
+                        if (chunk.toLowerCase().includes(word)) score++;
+                    });
+                    if (score > 0) allChunks.push({ chunk, score, source: doc.name });
+                });
+            });
+            allChunks.sort((a, b) => b.score - a.score);
+            return allChunks.slice(0, 5).map(item => `Trích từ tệp "${item.source}":\n${item.chunk}`);
+        }
+
+        async function generateAnswerWithGemini(query, contextChunks) {
+            const prompt = `Dựa **CHỈ** vào bối cảnh được cung cấp dưới đây để trả lời câu hỏi của người dùng. Không được sử dụng bất kỳ kiến thức bên ngoài nào. Nếu bối cảnh không chứa đủ thông tin để trả lời, hãy nói rõ: "Tôi không tìm thấy câu trả lời cho câu hỏi này trong tài liệu bạn đã cung cấp." Hãy trả lời một cách tự nhiên và súc tích.\n\n--- BỐI CẢNH ---\n${contextChunks.join('\n\n---\n\n')}\n--- HẾT BỐI CẢNH ---\n\nCâu hỏi của người dùng: "${query}"\n\nCâu trả lời:`;
+            const apiKey = "AIzaSyB7k4X7Hg1Oiq7fToQeWhpAtlufgsRRZ1o";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            const payload = { contents: [{ parts: [{ text: prompt }] }] };
+            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!response.ok) {
+                const errorBody = await response.text();
+                throw new Error(`API call failed with status: ${response.status}. Body: ${errorBody}`);
+            }
+            const result = await response.json();
+            if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0]) {
+                return result.candidates[0].content.parts[0].text;
+            } else {
+                console.warn("API response structure is unexpected:", result);
+                return "Tôi gặp sự cố khi xử lý yêu cầu. Vui lòng thử lại.";
+            }
+        }
+    </script>
+
+</body>
+</html>
